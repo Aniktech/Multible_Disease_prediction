@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Large Model Files (Keep them local or use Git LFS)
+models/*.joblib
+models/*.sav
+
+# Streamlit/OS
+.streamlit/
+.DS_Store

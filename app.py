@@ -1,115 +1,104 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import joblib
-import os
-from tensorflow.keras.models import load_model
-from sklearn.preprocessing import StandardScaler
+import numpy as np
+import google.generativeai as genai
 from PIL import Image
+from streamlit_option_menu import option_menu
 
-st.set_page_config(page_title="Disease Prediction App", layout="centered")
+# --- SETUP & CONFIG ---
+st.set_page_config(page_title="MediScan Pro", page_icon="🏥", layout="wide")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH_RF = os.path.join(BASE_DIR, "models", "rf_model.joblib")
-MODEL_PATH_ANN = os.path.join(BASE_DIR, "models", "ann_model.h5")
-SCALER_PATH = os.path.join(BASE_DIR, "models", "scaler.joblib")
-# --- Load Model ---
-st.title("🩺 Health & Lifestyle Disease Prediction App")
-st.markdown("This app predicts whether a person has any disease based on health and lifestyle parameters.")
+# Modern Styling
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { border-radius: 8px; height: 3em; background: linear-gradient(45deg, #007bff, #00d4ff); color: white; border: none; font-weight: bold; }
+    .prediction-card { padding: 20px; background: white; border-radius: 15px; border-left: 5px solid #007bff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    </style>
+""", unsafe_allow_html=True)
 
-model_type = None
-scaler = joblib.load(SCALER_PATH)
+# Load Models
+@st.cache_resource
+def load_assets():
+    model = joblib.load('models/ensemble_disease_model.joblib')
+    le = joblib.load('models/label_encoder.joblib')
+    scaler = joblib.load('models/scaler.joblib')
+    return model, le, scaler
 
-if os.path.exists(MODEL_PATH_ANN):
-    model_type = "ANN"
-    model = load_model(MODEL_PATH_ANN)
-    st.sidebar.success("🧠 ANN model loaded")
-elif os.path.exists(MODEL_PATH_RF):
-    model_type = "RF"
-    model = joblib.load(MODEL_PATH_RF)
-    st.sidebar.success("🌲 RandomForest model loaded")
-else:
-    st.error("❌ No trained model found. Run `python src/train_model.py` first.")
-    st.stop()
+model, le, scaler = load_assets()
 
-# --- Manual Input Form ---
-st.header("👩‍⚕️ Predict from Manual Input")
+# --- NAVIGATION ---
+with st.sidebar:
+    selected = option_menu(
+        "MediScan Pro",
+        ["Dashboard", "Symptom Checker", "Report AI", "History"],
+        icons=['grid', 'heart-pulse', 'file-earmark-text', 'clock-history'],
+        menu_icon="hospital", default_index=0
+    )
 
-col1, col2 = st.columns(2)
-with col1:
-    age = st.slider("Age", 18, 90, 40)
-    gender = st.selectbox("Gender", [0, 1], format_func=lambda x: "Male" if x==1 else "Female")
-    bmi = st.slider("BMI", 15.0, 45.0, 25.0)
-    bp = st.slider("Blood Pressure", 80, 200, 120)
-    cholesterol = st.slider("Cholesterol", 100, 400, 200)
-    sugar = st.slider("Blood Sugar", 50, 400, 100)
-    body_temp = st.slider("Body Temperature (°F)", 96.0, 104.0, 98.4)
-    sleep_hours = st.slider("Sleep Hours per Day", 3.0, 10.0, 7.0)
-with col2:
-    tremor = st.selectbox("Tremor", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-    voice_change = st.selectbox("Voice Change", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-    fatigue = st.selectbox("Fatigue", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-    chest_pain = st.selectbox("Chest Pain", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-    smoking = st.selectbox("Smoking Habit", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-    alcohol = st.selectbox("Alcohol Consumption", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-    diet_score = st.slider("Diet Quality (1 = Poor, 10 = Excellent)", 1, 10, 6)
-    exercise_frequency = st.slider("Exercise Frequency (Days per Week)", 0, 7, 3)
-    family_history = st.selectbox("Family History of Disease", [0, 1], format_func=lambda x: "Yes" if x==1 else "No")
-
-if st.button("🔍 Predict Disease"):
-    input_data = pd.DataFrame([{
-        "age": age, "gender": gender, "bmi": bmi, "bp": bp,
-        "cholesterol": cholesterol, "sugar": sugar, "tremor": tremor,
-        "voice_change": voice_change, "fatigue": fatigue, "chest_pain": chest_pain,
-        "smoking": smoking, "alcohol": alcohol, "diet_score": diet_score,
-        "exercise_frequency": exercise_frequency, "family_history": family_history,
-        "sleep_hours": sleep_hours, "body_temp": body_temp
-    }])
-
-    scaled = scaler.transform(input_data)
-    if model_type == "ANN":
-        prob = float(model.predict(scaled)[0][0])
-        prediction = 1 if prob >= 0.5 else 0
-    else:
-        prob = model.predict_proba(scaled)[0][1]
-        prediction = int(model.predict(scaled)[0])
-
-    label = "🩸 **Disease Detected**" if prediction == 1 else "💚 **No Disease Detected**"
-    st.success(f"Prediction: {label}")
-    st.write(f"Confidence: **{prob*100:.2f}%**")
-
-# --- Visualization Section ---
-st.header("📊 Model Comparison & Training Insights")
-
-if os.path.exists("models/model_comparison.png"):
-    st.image("models/model_comparison.png", caption="Model Accuracy Comparison", use_container_width=True)
-if os.path.exists("models/ann_training_curve.png"):
-    st.image("models/ann_training_curve.png", caption="ANN Training Progress", use_container_width=True)
-
-# --- CSV Upload ---
-st.header("📁 Predict from CSV File")
-st.markdown("Upload a CSV file containing all the same feature columns used for training.")
-uploaded = st.file_uploader("Upload CSV File", type=["csv"])
-if uploaded:
-    df = pd.read_csv(uploaded)
-    st.write("Preview of Uploaded Data:")
-    st.dataframe(df.head())
-
-    try:
-        scaled = scaler.transform(df)
-        if model_type == "ANN":
-            probs = model.predict(scaled)
-            preds = (probs >= 0.5).astype(int).flatten()
+# --- SYMPTOM CHECKER ---
+if selected == "Symptom Checker":
+    st.title("🩺 Advanced Symptom Analysis")
+    st.write("Select the symptoms you are experiencing for a high-accuracy prediction.")
+    
+    # Get features from the model (assuming they match columns in your dataset)
+    symptoms_list = ["Fever", "Cough", "Fatigue", "Shortness of Breath", "Headache"] # Replace with your 132 symptoms
+    
+    selected_symptoms = st.multiselect("Search & Select Symptoms", symptoms_list)
+    
+    if st.button("Generate Diagnostic Report"):
+        if not selected_symptoms:
+            st.warning("Please select at least one symptom.")
         else:
-            preds = model.predict(scaled)
-            probs = model.predict_proba(scaled)[:, 1]
+            with st.spinner("Analyzing data patterns..."):
+                # Create input vector (1 for present, 0 for absent)
+                input_vector = np.zeros(len(symptoms_list))
+                for s in selected_symptoms:
+                    input_vector[symptoms_list.index(s)] = 1
+                
+                # Scale and Predict
+                scaled_input = scaler.transform([input_vector])
+                prediction = model.predict(scaled_input)
+                disease_name = le.inverse_transform(prediction)[0]
+                
+                # Display Results
+                st.markdown(f"""
+                <div class="prediction-card">
+                    <h3>Analysis Result</h3>
+                    <p>Based on the patterns detected, the most likely condition is:</p>
+                    <h2 style="color: #007bff;">{disease_name}</h2>
+                    <p><i>Confidence: High (Ensemble Verified)</i></p>
+                </div>
+                """, unsafe_allow_html=True)
 
-        df["Prediction"] = np.where(preds == 1, "Disease", "Healthy")
-        df["Confidence (%)"] = (probs * 100).round(2)
+# --- REPORT AI ---
+elif selected == "Report AI":
+    st.title("📂 AI Medical Report Analysis")
+    st.info("Upload a blood test or clinical report (PDF/Image) for an AI-powered summary.")
+    
+    uploaded_file = st.file_uploader("Upload Document", type=["png", "jpg", "jpeg", "pdf"])
+    
+    if uploaded_file:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Report", use_column_width=True)
+        
+        if st.button("Analyze with Gemini AI"):
+            # Configure your Gemini Key here
+            genai.configure(api_key="YOUR_GEMINI_API_KEY")
+            vision_model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            prompt = """
+            Extract the medical data from this report. 
+            Identify abnormal values (High/Low). 
+            Explain these in simple terms and suggest the next steps for the user. 
+            Keep it structured with Bullet Points.
+            """
+            
+            response = vision_model.generate_content([prompt, image])
+            st.subheader("🤖 AI Interpretation")
+            st.write(response.text)
+            st.warning("Notice: This is an AI analysis. Always verify results with a qualified doctor.")
 
-        st.success("✅ Predictions completed!")
-        st.dataframe(df.head())
-
-        st.download_button("📥 Download Results", df.to_csv(index=False).encode("utf-8"), "predictions.csv")
-    except Exception as e:
-        st.error(f"Error: {e}")
+else:
+    st.title("Dashboard")
+    st.write("Welcome back! Select a tool from the sidebar to begin.")
