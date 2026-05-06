@@ -1,111 +1,111 @@
-import os
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import joblib
+import os
 from tensorflow.keras.models import load_model
 from PIL import Image
 from fpdf import FPDF
 from streamlit_option_menu import option_menu
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
+# --- CONFIGURATION & CLINICAL THEME ---
 load_dotenv()
-st.set_page_config(page_title="Multi-Disease Predictor", page_icon="🏥", layout="wide")
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+st.set_page_config(page_title="HealthNexus AI", page_icon="🏥", layout="wide")
 
-# Formatting
 st.markdown("""
     <style>
-    .stButton>button { border-radius: 8px; background: #007bff; color: white; width: 100%; }
-    .report-box { padding: 20px; background: #ffffff; border-radius: 10px; border-left: 5px solid #007bff; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); }
+    .main { background-color: #f8f9fa; }
+    .stButton>button {
+        width: 100%;
+        border-radius: 6px;
+        height: 3.5em;
+        background-color: #004a99;
+        color: white;
+        font-weight: bold;
+        border: none;
+    }
+    h1 { color: #004a99; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-@st.cache_resource
-def load_assets():
+# --- AI INITIALIZATION (FIXED ROUTING) ---
+# Explicitly using the stable 'v1' api_version to avoid the 404 Beta error
+client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY"),
+    http_options={'api_version': 'v1'} 
+)
+
+try:
     model = load_model('models/ann_model.h5')
     scaler = joblib.load('models/scaler.joblib')
-    le = joblib.load('models/label_encoder.joblib')
-    
-    # Load metadata files
-    desc = pd.read_csv('data/symptom_Description.csv')
-    precaution = pd.read_csv('data/symptom_precaution.csv')
-    
-    # Extract symptoms from training data structure
-    data_cols = pd.read_csv('data/dataset.csv').columns[:-1]
-    return model, scaler, le, list(data_cols), desc, precaution
+    symptoms_list = joblib.load('models/symptoms_list.joblib')
+    label_encoder = joblib.load('models/label_encoder.joblib')
+except Exception as e:
+    st.error(f"⚠️ System Failure: {e}")
+    st.stop()
 
-model, scaler, le, symptoms_list, desc_df, prec_df = load_assets()
-
-def get_pdf(disease, details, precautions):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, "Medical Diagnostic Report", ln=True, align='C')
-    pdf.ln(10)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(200, 10, f"Condition: {disease}", ln=True)
-    pdf.set_font("Arial", size=11)
-    pdf.multi_cell(0, 10, f"Description: {details}")
-    pdf.ln(5)
-    pdf.cell(200, 10, "Recommended Precautions:", ln=True)
-    for p in precautions:
-        pdf.cell(200, 8, f"- {p}", ln=True)
-    return pdf.output(dest='S').encode('latin-1')
-
+# --- SIDEBAR ---
 with st.sidebar:
+    st.title("🏥 HealthNexus AI")
     selected = option_menu(
-        "Menu", ["Dashboard", "Predictor", "Lab Analysis"], 
-        icons=['house', 'search', 'camera'], default_index=1
+        menu_title="Clinical Portal",
+        options=["Patient Diagnosis", "Lab Analysis"],
+        icons=["person-vcard", "microscope"],
+        menu_icon="hospital-fill",
+        default_index=0
     )
 
-if selected == "Dashboard":
-    st.title("🏥 System Dashboard")
-    st.write("Welcome to the Multi-Disease Prediction System. Use the sidebar to navigate.")
-    st.image("models/model_comparison.png", caption="Model Performance Analytics")
+# --- PAGE 1: PATIENT DIAGNOSIS ---
+if selected == "Patient Diagnosis":
+    st.title("🩺 Patient Symptom Diagnosis")
+    user_symptoms = st.multiselect("🔍 Search Clinical Symptoms:", options=symptoms_list)
 
-elif selected == "Predictor":
-    st.title("🩺 Disease Predictor")
-    user_inputs = st.multiselect("Select your symptoms:", symptoms_list)
-    
-    if st.button("Analyze Health"):
-        if user_inputs:
-            # Vectorization
-            vec = np.zeros(len(symptoms_list))
-            for s in user_inputs:
-                vec[symptoms_list.index(s)] = 1
+    if st.button("Generate Diagnostic Prediction"):
+        if user_symptoms:
+            input_vector = np.zeros(len(symptoms_list))
+            for s in user_symptoms:
+                if s in symptoms_list:
+                    input_vector[symptoms_list.index(s)] = 1
             
-            # Prediction
-            res = model.predict(scaler.transform([vec]))
-            disease = le.inverse_transform([np.argmax(res)])[0]
-            
-            # Fetch Metadata
-            d_desc = desc_df[desc_df['Disease'] == disease]['Description'].values[0]
-            d_prec = prec_df[prec_df['Disease'] == disease].iloc[:, 1:].values.flatten().tolist()
-            
-            st.markdown(f"""<div class='report-box'>
-                <h2>Result: {disease}</h2>
-                <p><b>Description:</b> {d_desc}</p>
-            </div>""", unsafe_allow_html=True)
-            
-            st.subheader("Recommended Actions")
-            for p in d_prec:
-                if str(p) != 'nan': st.write(f"✅ {p}")
-            
-            pdf_data = get_pdf(disease, d_desc, d_prec)
-            st.download_button("📥 Download Report", pdf_data, "Health_Report.pdf", "application/pdf")
+            scaled_vec = scaler.transform(input_vector.reshape(1, -1))
+            prediction_prob = model.predict(scaled_vec)
+            disease = label_encoder.inverse_transform([np.argmax(prediction_prob)])[0]
+
+            st.subheader("Diagnostic Summary")
+            st.metric("Likely Condition", disease, f"{np.max(prediction_prob)*100:.2f}% Confidence")
         else:
-            st.warning("Please select at least one symptom.")
+            st.error("No symptoms selected.")
 
+# --- PAGE 2: LAB ANALYSIS (GEMINI BRANDING REMOVED) ---
 elif selected == "Lab Analysis":
-    st.title("🔬 AI Lab Report Analysis")
-    file = st.file_uploader("Upload report image", type=['jpg', 'png', 'jpeg'])
-    
-    if file:
-        img = Image.open(file)
-        st.image(img, width=500)
-        if st.button("Process with Gemini AI"):
-            gemini = genai.GenerativeModel('gemini-1.5-flash')
-            resp = gemini.generate_content(["Explain the abnormal values in this report and provide health advice.", img])
-            st.write(resp.text)
+    st.title("🔬 Laboratory Report Intelligence")
+    st.write("Scan and interpret biochemical markers from laboratory reports.")
+
+    uploaded_file = st.file_uploader("Upload Laboratory Report", type=["jpg", "jpeg", "png"])
+
+    if uploaded_file:
+        img = Image.open(uploaded_file)
+        st.image(img, caption="Patient Record Attachment", width='stretch')
+
+        # Removed "via Gemini AI" from button and text
+        if st.button("Analyse the report"):
+            with st.spinner("Analyzing laboratory data..."):
+                try:
+                    # Using the stable model identifier
+                    response = client.models.generate_content(
+                        model='gemini-1.5-flash',
+                        contents=[
+                            "Provide a clinical summary of this report. Identify values outside of reference ranges.",
+                            img
+                        ]
+                    )
+                    
+                    st.success("Analysis Complete")
+                    st.markdown("### Clinical Interpretation")
+                    st.write(response.text)
+                    
+                    st.download_button("Download Report Summary", response.text, file_name="lab_summary.txt")
+                except Exception as e:
+                    st.error(f"Analysis Failed: {e}")
