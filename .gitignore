@@ -1,12 +1,19 @@
-# Python
-__pycache__/
-*.pyc
+# Sensitive data
 .env
 
-# Large Model Files (Keep them local or use Git LFS)
-models/*.joblib
-models/*.sav
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
 
-# Streamlit/OS
-.streamlit/
+# Environments
+.venv/
+venv/
+env/
+
+# Large Model files (Optional: keep if you want models on GitHub)
+# models/*.h5
+# models/*.joblib
+
+# OS files
 .DS_Store
